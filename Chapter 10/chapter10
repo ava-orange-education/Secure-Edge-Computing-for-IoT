@@ -1,0 +1,245 @@
+## Update the OS:
+
+sudo apt update
+sudo apt install git
+git --version
+
+
+## Clone the Edge IoT Git
+
+mkdir edge1-wrkdir
+cd edge1-wrkdir
+cp ../iotedge/tools/CACertificates/*.cnf .
+cp ../iotedge/tools/CACertificates/certGen.sh .
+./certGen.sh create_root_and_intermediate
+
+##Install Java Development Kit (jdk)
+
+sudo apt update
+sudo apt install unzip default-jdk
+
+
+## Installing IoT Edge:
+
+wget https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
+sudo dpkg -i packages-microsoft-prod.deb
+rm packages-microsoft-prod.deb
+
+## Installing a container engine
+
+sudo apt-get update
+sudo apt-get install moby-engine
+
+
+## Create the Docker daemon's config file at /etc/docker/daemon.json
+
+JSON
+Copy
+   {
+      "log-driver": "local"
+   }
+
+
+## Restart the container engine 
+
+Bash
+Copy
+sudo systemctl restart docker
+
+
+## Create Edge project template
+
+              
+$ mkdir myegdesolution
+$ iotedgedev solution init –template python
+
+
+## Build and push your first data sender application
+
+package com.edgemodule;
+
+import com.microsoft.azure.sdk.iot.device.*;
+import java.io.IOException;
+import java.text.SimpleDateFormat;
+
+public class App {
+    private static EventCallback eventCallback = new EventCallback();
+
+    protected static class EventCallback implements IotHubEventCallback {
+        @Override
+        public void execute(IotHubStatusCode status, Object context) {
+            if (context instanceof Message) {
+                System.out.println("Send message with status: " + status.name());
+            } else {
+                System.out.println("Invalid context passed");
+            }
+        }
+    }
+    public static void main(String[] args) throws IOException {
+        System.out.println("The main function was invoked.");
+        DeviceClient client = null;
+        try {
+            client = new DeviceClient("<your device device connection strings here>" , IotHubClientProtocol.HTTPS);
+            client.open();
+            for (int i=0; i<60; i++) {
+                String timestampStr = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'").format(new java.util.Date());
+                double temperature = 20 + Math.random() * 15;
+                String msgStr = timestampStr + "," + String.valueOf(temperature);
+                Message msg = new Message(msgStr);
+                System.out.println("msg: " + msgStr);
+                client.sendEventAsync(msg, eventCallback, msg);
+                Thread.sleep(60000);
+            }
+            client.closeNow();
+        } catch (Exception e) {
+            e.printStackTrace();
+            if (client != null) {
+                client.closeNow();
+            }
+            System.exit(1);
+        }
+    }
+}
+
+## create the cattle project using the commands below.
+              
+$ mkdir cattle_iotedge_project
+$ pip install azure-functions pymongo
+
+
+## Send cattle tag IoT data to Azure IoT Hub
+
+$ touch cattle_device.py
+# Add the following content to the file.
+from azure.iot.device import IoTHubDeviceClient, Message
+import json
+import random
+import time
+
+# Replace with your Azure IoT Hub connection string
+CONNECTION_STRING = "<Your-IoTHub-Connection-String-Here>"
+
+# Function to create a simulated cattle tag IoT data
+def generate_farm_cattle_data():
+    farm_cattle_data = {
+        "tag_id": "CattleTag2024-0000001",
+        "temperature": random.uniform(35.0, 40.0),
+		"movement": random.uniform(10.0, 20.0, 30.0, 40.0, 50.0),
+        "humidity": random.uniform(50.0, 70.0),
+        "location": {
+            "latitude": random.uniform(-90, 90),
+            "longitude": random.uniform(-180, 180)
+        }
+    }
+    return json.dumps(farm_cattle_data)
+
+def iothub_client_init():
+    client = IoTHubDeviceClient.create_from_connection_string(CONNECTION_STRING)
+    return client
+
+def send_message(client, message):
+    print("Sending message: {}".format(message))
+    client.send_message(message)
+    print("Message sent successfully!")
+
+def main():
+    try:
+        client = iothub_client_init()
+
+        while True:
+            farm_cattle_data = generate_farm_cattle_data()
+            message = Message(farm_cattle_data)
+            send_message(client, message)
+
+            # Send data every 10 seconds (adjust as needed)
+            time.sleep(10)
+
+    except KeyboardInterrupt:
+        print("IoT Hub Device Simulator stopped.")
+
+if __name__ == "__main__":
+    main()
+
+
+## Create Azure function to send IoT data to MongoDB database
+
+$ touch cattle_data_mongodb.py
+# Add the following content to the file.
+import os
+import pymongo
+import azure.functions as func
+
+def main(msg: func.ServiceBusMessage):
+    # Retrieve MongoDB connection string from Azure Functions application settings
+    mongo_connection_string = os.environ['Your-MongoDB-Connection-String-Here']
+    
+    # Parse IoT data from the Service Bus message
+    iot_data = msg.get_body().decode('utf-8')
+    
+    # Connect to MongoDB
+    client = pymongo.MongoClient(mongo_connection_string)
+    
+    # Choose your database and collection
+    db = client['Your-Database-Name-Here']
+    collection = db['Your-Collection-Name-Here']
+    
+    # Insert IoT data into MongoDB
+    result = collection.insert_one({"data": iot_data})
+    
+    # Log the result
+    if result.inserted_id:
+        print(f"Data inserted into MongoDB with ID: {result.inserted_id}")
+    else:
+        print("Failed to insert data into MongoDB")
+
+    # Close the MongoDB connection
+    client.close()
+
+
+## Create machine learning program to fetch data from MongoDB database
+
+$ pip install pymongo scikit-learn
+$ touch cattleml.py
+
+# Add the following content to the file.
+# Import necessary libraries
+import pymongo
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
+
+# Connect to MongoDB
+client = pymongo.MongoClient("mongodb://<Your-MongoDB-IP-Address-Here>:27017/")
+db = client["Your-Database-Name-Here"]
+collection = db["Your-Collection-Name-Here"]
+
+# Fetch data from MongoDB
+cursor = collection.find()
+data = list(cursor)
+
+# Convert data to Pandas DataFrame
+df = pd.DataFrame(data)
+
+# Preprocess the data as needed
+# For example, handle missing values, encode categorical variables, etc.
+
+# Define features and target
+X = df.drop("Your-Target-Column-Name-Here", axis=1)
+y = df["target_column"]
+
+# Split the data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Initialize a machine learning model (Random Forest Classifier in this example)
+model = RandomForestClassifier()
+
+# Train the model
+model.fit(X_train, y_train)
+
+# Make predictions on the test set
+predictions = model.predict(X_test)
+
+# Evaluate the model
+accuracy = accuracy_score(y_test, predictions)
+print(f"Model Accuracy: {accuracy}")
